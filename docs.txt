@@ -1,0 +1,367 @@
+JS/UIX - A Short Documentation (based on v.0.44)
+
+
+               JJJ    SSSSSS        // UU     UU   IIII   XX    XX
+                JJ   SS    SS      //  UU     UU    II     XX  XX
+                JJ   SS           //   UU     UU    II      XXXX
+                JJ    SSSSSS     //    UU     UU    II       XX
+          JJ    JJ         SS   //     UU     UU    II      XXXX
+          JJ    JJ   SS    SS  //      UU     UU    II     XX  XX
+           JJJJJJ     SSSSSS  //        UUUUUUU    IIII   XX    XX
+
+
+          
+by Norbert Landsteiner
+
+
+
+
+1) What it is
+
+JS/UIX is a virtual OS written entierly in JavaScript to be run in any standard
+web-browser (type 4.0 or higher).
+The user interface - a simple 80 colums terminal - is implemented in DHTML but
+could be implemented in any other JavaScript compliant application environment
+as p.e. Macromedia Flash(TM).
+
+JS/UIX features a UN*X-like operating environment with no intention of any full
+POSIX compatibility. Some standard commands have been implemented at full range
+others with just simple syntax or basic functionality, while new commands have
+been added. The only application for now is a simple implementation of vi
+(visual editor).
+
+JS/UIX is now a mere demonstration object. A serious application could be its
+use as an interface to a server-shell or CGI-process via a rlogin like
+protocoll, where any transaction data could be encrypted and stored in an
+additional HTML-[I]FRAME.
+
+            CLIENT                               HOST
+ +--------+----------------+       +---------------+-------------+----------+
+ |        |Transaction-Data|       |    Special    | persistant  | Apps.    |
+ | JS/UIX |    IFRAME      | <---> |  HTTP-SERVER  | USER-SHELL  |    &     |
+ |        |encrypt/decrypt |       |encrypt/decrypt|(local UNI*X)| Services |
+ +--------+----------------+       +---------------+-------------+----------+
+
+ Fig. 1: Possible implementation of a remote interface
+
+
+A second application could be an embedded service, which would be executed
+local to the client but would retrieve remote data from a host via HTTP and
+CGI.
+
+                  CLIENT                                   HOST
+ +--------+-----------+----------------+       +---------------+----------+
+ |        |  Service  |Transaction-Data|       |     CGI       | DB,Files |
+ | JS/UIX |Application|    IFRAME      | <---> |  HTTP-SERVER  |    &     |
+ |        |  (local)  |encrypt/decrypt |       |encrypt/decrypt| Services |
+ +--------+-----------+----------------+       +---------------+----------+
+
+ Fig. 2: Possible implementation of a local service using remote data
+
+
+Note: JS/UIX not a free software. If you're looking for a powerful but
+easy to use terminal interface see <http://www.masswerk.at/termlib>.
+
+
+
+2) Features & Functions
+
+a) Users and Files
+
+JS/UIX accepts any valid user name as login with the exception of "exit" and
+"root" (or any of their derevative spellings). "exit" will close the console
+while "root" is a protected user showing a password prompt. (root:machtNix)
+(Future versions might allow password control for all users via a "passwd"-
+command. A practical implementation - see above, fig. 1-2 - would probably
+not give access to unregistrated users. This should be a demo feature only.)
+
+A valid login triggers the following steps:
+ - an entry in /etc/passwd is searched or generated
+ - an entry in /etc/group is searched or generated
+ - the home directory /home/<user> is generated if not found
+ - the home directory and user-variables are set
+ - the history file /home/<user>/.history is loaded or generated
+ - the file /etc/profile is searched and executed
+ 
+"root" has the UID 0 and is allocated to the groups 0 (system) and 1 (wheel),
+while a normal user acquires a UID greater than 100 and is allocated to the
+groups 1 (wheel) and 2 (users) with GID 2.
+
+The same steps are taken at "su" (switch user) but the working directory will
+not be set to the home directory ($HOME). (See the note on "su" below.)
+
+A typical allocation of users and groups after a login with user-id "guest" will
+look like the following:
+
+  $ cat /etc/passwd
+  root:*:0:1:root:/root:/bin/sh
+  guest:*:101:2:guest:/home/guest:/bin/sh
+  
+  $ cat /etc/group
+  system:0:root
+  users:2:guest
+  wheel:1:root,guest
+  
+  Fig. 3: Users and groups after login with user-id "guest"
+
+
+After login the user will be prompted with the default prompt:
+
+[guest@masswerk.at:2]$ _
+
+showing the user-name, host and PID as defined in $PS.
+(default value: [${USER}@${HOST}:${PID}])
+A normal user's prompt will be marked with the suffix "$" while the root user's
+prompt is marked with the suffix "#". (Hard coded, no $PS2 by now!)
+
+Note:
+Currently the prompt is not a function of the shell but of the kernel
+(triggered by the TTY-interface). This should be fixed in future versions.
+
+
+b) Files
+
+Files are stored virtually in the browsers memory using custom JS-objects.
+Files can be internally accessed using file handles and their IO-interface
+(using the following functions: touch, readLine, putLine, putNewLine, putChunk,
+getChar, ungetChar, close, rewind).
+
+Currently files have the following descriptive properties:
+- inode
+- kind (directory, file, pipe, link, binary executable [JS-application])
+- owner
+- user
+- group
+- mode
+- (icnt) inode count
+- mdate
+
+  size is calculated on the fly, if needed.
+
+Executable files must have set their execute-bit (cf. man chmod) and may start
+with a "magic cookie" (#!... defaults to: "#/bin/sh").
+
+
+
+c) Processes, Childs, Environments
+
+All data managment is implemented via streams allocated to process environments.
+Every command (but shell commands) triggers a new child process with its own
+environment attached. Currently a process can only entertain a single child.
+(Since background processes are not implemented yet, this is of no practical
+concern and no limitation of possible tasks. One of the reasons for this is
+the single threadded nature of JavaScript - see below.)
+
+Opposed to a normal UN*X system parent/child notifications are implemented top
+down: A parent process "knows" and controls its child, while the child has no
+knowledge of its parent. (Therefor JS/UIX lacks the shell variable $PARENT.)
+As a side effect there is no need for any signals, since any child must rise
+to its parent after return of control. So the parent is able to detect the
+child's state and handle control accordingly. This was done to implement
+multiple threads on a single threadded system as JavaScript in strait forward
+fashion. Since JavaScript is strictly single threadded, there is no way to
+implement subprocesses as subprocedures. This means, that in the case of a
+child process demanding input, all virtual threads have to rise up and be
+dropped in order to registrate any event-driven input from the browser. (Events
+are only processed in idle state.) In order to resume operations, all virtual
+threads must be picked up top down untill the demanding child process is
+reached. (To do so, every process must know about its child.) The re-entry state
+must be controled by the target process itself via environment variables.
+
+This dropping and re-picking of threads is done by a TTY-pseudo-demon, which is
+listed in the process list (ps) as "ttyd" (usally PID 1). Its job is to store
+the top most process and set some control information for the key handler. The
+key handler manages input and returns control to the ttyd based on these control
+settings.
+
+The cross functionallity of this could be described as co-operative
+multitasking on a single threadded system.
+
+
+Processes can communicate via streams with the usual STDIN/STDOUT interface.
+
+Currently a typical environment posesses the following minimum properties:
+- PID
+- ID (named id, command)
+- STDIN
+- STDOUT
+- STDERR
+- ER (error number - not really implemented yet)
+- cwd (current working directory)
+- args (ARGV)
+- status (contol information ""|"wait")
+- child (reference to child object)
+- bin (name of JavaScript function for returning childs)
+
+STDERR is allways the console, STDIN and STDOUT may be redirected or piped.
+
+(Some commands behave differently if handled through a pipe to accomodate
+normal operations; e.g.: loss of type styles, "ls" default output is one file
+name per line.)
+
+
+
+
+3) Shell
+
+For detailed information see "man sh".
+
+Quotes and Control Characters:
+  " ... quote of white space, variable interpolation
+  ' ... single quotes no interpolation or evaluation
+  ` ... evaluate (backticks)
+  | ... pipe
+  ; ... command separator
+  > ... output redirection to file
+  >> ... as above but appends to existing file
+  \ ... at end of line: line continuation
+
+As opposed to standard shells all characters are quotable using backslashes,
+including "'" and "`" (in order to comply to future remote tasks).
+
+Arguments can be accessed as $<n>, where <n> is the ordinal number of the
+argument, $0 being the command name.
+
+Varibles can be set and unset using "set" and "unset", aliases using "alias"
+and "unalias".
+
+All user variables are stored in an array separate from the environment and are
+therefor generally global. (This may change in a future versions.)
+
+Currently the system employs a number of special variables:
+  GID      group-id
+  HOME     home directory
+  HOST     login-host
+  PATH     command path
+  PID      process id of current process environment
+  PS       shell prompt
+  UID      user-id
+  USER     user-name (log-name)
+  VERSION  os/term-version
+
+No shell globbing is implemented yet. (What should we glob accessing a remote
+service? The virtual file system, the remote system ... ?)
+
+Note on "su":
+Currently no new shell-session is born by "su" - you are continuing with the
+executing shell. Accordingly "exit" will bring you back to the login-screen,
+in case the current shell was the login-shell.
+
+
+
+4) Display, Console
+
+The display acts on a configurable console (default 80 x 24 chars) using type
+styles (plain, underline, reverse, stroke - no bold for variable char widths.)
+There are two sets of display controls (character placing, scrolling etc.), one
+for normal commandline use in the kernel, one for full screen use implemented
+in the vi-application.
+The console may be split vertically reserving the lower part for system-output.
+(e.g. status information. cf. vi). The cursor supports block and underline mode
+and optional blinking (accessable via "stty").
+
+With v.0.44 JS/UIX supports a "smart scroll" mode for console output: As long
+as output is handled via a single buffer only visible changes are rendered to
+the console. This option is activated by default and my be controlled via the
+"stty" command. (This "smart console" behaviour is implemented by the use of an
+intermediary output buffer and is only accessible via calls of "krnlFOut()".)
+
+Currently the keyboard-handler acts in three different modes:
+- cooked (normal commandline mode, closing CR)
+- wantChar (single character mode)
+- uncooked (no parsing, no cursor, no backspace)
+
+
+
+5) Architecture
+
+The JS/UIX system is built of two major components and various subcomponents as
+shown in Fig. 4:
+
+  JS/UIX
+  |
+  +- Webpage/DHTML - nested CSS-Division
+  |                - JavaScript event-handlers (for keyboard-interface)
+  |                - graphic keyboard (generic images and Anchor-TAGs)
+  |
+  +- JavaScript    - jsuix_gui.js (DHTML-functions and interface-data)
+                   - jsuix_krnl.js (kernel functions)
+                   - jsuix_shell.js (shell functions and shell commands)
+                   - jsuix_cmd.js (commands)
+                   - jsuix_vi.js (vi application)
+                   - jsuix_rc.js (data for files to be embedded at boot time)
+                   - jsuix_man.js (data for manual system)
+
+  Fig. 4: Major components of JS/UIX
+
+
+Since all I/O is abstracted and the only HTML-specific parts are concentrated in
+'jsuix_gui.js' and the key-handler of 'jsuix_krnl.js', the whole system could be
+transfered to any other JavaScript-enabled application with minor modifications.
+(p.e.: Compiled as a native Macromedia Flash(TM) projector).
+
+
+
+6) Virtual Machine Specifiations
+
+The virtual machine (VM) of JS/UIX is defined by the I/O system, the virtual
+file system (VFS), and the specifications of the ECMA262-2 implementation on
+which it relies.
+
+The I/O system supports the first 256 characters of unicode code page #0
+[\u0001-\u00ff]. The console output supports limited type styles (plain,
+bold, italics, strike, reverse video) in a mono spaced font.
+
+The VFS is limited to plain text files in a line oriented mode. (Files are
+organized as arrays of single lines. This should change in a future version.)
+The VFS employs file permissions as read, write, search/execute, and sticky bit
+for users, groups, and others. Files of the VMS are identified per inode number
+and are protected against recursive paths.
+
+The native language of the VM is JavaScript meeting the specifications of ECMA-
+262 2nd edition (ECMA-262-2, here also referred to as JS).
+(The restriction to ECMA-262-2 garantees compatibility in a large scale, but
+it also limits the support of list manipulation as ECMA-262-2 does not provide
+specifications for the methods "push()", "pop()", "shift()", "unshift()", or
+"splice()" of "Array.prototype". While ECMA-262-2 does specify
+"String.fromCharCode()" and "String.prototype.charCodeAt()", some browsers lack
+these methods in their implementation of JavaScript. JS/UIX provides custom
+String-methods for those browsers.)
+In addition to the ECMA-262-2 specification the native language makes use of
+the anonymous array construct and the anonymous object construct which have
+been found save for current JavaScript implementations.
+Further the VM makes use of some properties of a browser-specific host environ-
+ment (c.f. ECMA-262-2) as the global object ("window") being referenced by
+"self" and some of its properties and objects as "open()", "location", "event",
+"status", "document", and any of the customary event handling schemes.
+(These properties of the global object are typically used in the context of
+the user interface. The use of "self" may be overcome by the assignment of an
+explicit reference to the execution context. [e.g. an implementation in
+Macromedia ActionScript(TM) could define "var self=this;"])
+
+As memory is provided by the host environment the amount of available memory
+- both for the VFS and the processes' environments - depends on the capacity
+of the host system and the memory allocated to the host environment (browser).
+
+The VM and basic commands are implemented using the native language (JS).
+A special file path "/dev/js" provides a transparent glue for commands in the
+VFS and their implementations in the native language.
+(If executed by the shell, a VFS-file with execute permissions and the first
+line reading "#!/dev/js/commandName" will issue a call of "self.commandName()"
+in the native language (JS) providing a fresh process environment (via fork)
+as the argument. The parameters as traced by the shell are provided as a
+property of the process environment.)
+
+
+Introducing a new Term: (Distributed) Hosted Operating Systems
+In fact - as suggested in a comment - we could coin the term "Hosted OS" for
+JS/UIX that would make it the first "HOS". By implementing a distributed com-
+munication stack JS/UIX would even become the first distributed HOS or "DHOS".
+
+
+### To be continued.  ####
+
+
+
+Norbert Landsteiner
+<http://www.masswerk.at>
